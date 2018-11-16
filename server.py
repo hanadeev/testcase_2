@@ -7,8 +7,8 @@ import logging
 import random
 import projectconf as cf
 
-# logging.disable(logging.CRITICAL)
-logging.basicConfig(level=logging.DEBUG)
+logging.disable(logging.CRITICAL)
+# logging.basicConfig(level=logging.DEBUG)
 
 
 class DataBase:
