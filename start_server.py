@@ -1,4 +1,4 @@
-#!/srv/anaconda3/bin/python3.7
+#!/usr/bin/python3
 
 import server
 
