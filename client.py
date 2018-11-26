@@ -21,6 +21,10 @@ class GameClient:
         self._socket = None
         self.player_name = ''
         self.player_id = ''
+        self.ui = ({'label': 'Inventory',   'def': self._show_inventory},
+                   {'label': 'Shop',        'def': self._show_shop},
+                   {'label': 'Game',        'def': self._game},
+                   {'label': 'Exit',        'def': self._logout})
 
     def start(self):
         print('Welcome to %GAME%')
@@ -28,36 +32,36 @@ class GameClient:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as self._socket:
                 self._socket.connect((self.host, self.port))
 
-                self._login()
+                try:
+                    self._login()
+                    self._show_mainscreen()
+                    print('Close connection')
 
-                hello_msg = """
-Choose from the following options:
-1. Inventory
-2. Shop
-3. Game
-4. Exit"""
-                while True:
-                    print(hello_msg)
-                    try:
-                        choice = int(input())
-                        if choice == 1:
-                            self._show_inventory()
-                        elif choice == 2:
-                            self._show_shop()
-                        elif choice == 3:
-                            self._game()
-                        elif choice == 4:
-                            self._socket.sendall(cf.encode({'logout': '1'}))
-                            break
-
-                    except ValueError:
-                        pass
-                print('Close connection')
+                except KeyboardInterrupt:
+                    print('KeyboardInterrupt. Exit')
+                    if self.player_id:
+                        self._logout()
 
         except ConnectionRefusedError:
             print("Server is not available. Try later or contact support")
         except BrokenPipeError:
             print("Broken pipe. Contact support")
+
+    def _show_mainscreen(self):
+        mainscreen_msg = 'Choose from the following options:\n'
+        for idx, s in enumerate(self.ui, 1):
+            mainscreen_msg += "{}. {}\n".format(idx, s.get('label'))
+        while True:
+            print(mainscreen_msg)
+            try:
+                choice = int(input())
+                d = self.ui[choice - 1]
+                f = d['def']
+                result = f()
+                if result == 'exit':
+                    break
+            except (ValueError, IndexError):
+                pass
 
     def _show_inventory(self):
         g = {'get': 'inventory', 'player_id': self.player_id}
@@ -135,6 +139,10 @@ Choose from the following options:
                 print("Incorrect input")
                 continue
 
+    def _logout(self):
+        self._socket.sendall(cf.encode({'logout': '1'}))
+        return 'exit'
+
     def _login(self):
         while True:
             login = input('Your login: ')
@@ -167,7 +175,7 @@ Choose from the following options:
 
                 bet = int(input('Your bet (from 1 to {}, 0 - exit): '.format(cr)))
 
-                if bet == 0:
+                if not bet:
                     break
 
                 g = {'game': bet, 'player_id': self.player_id}

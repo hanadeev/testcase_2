@@ -64,6 +64,7 @@ class DataBase:
                             "foreign key (player_id) references players(id),"
                             "foreign key (item_id)  references items(id));"
                             "")
+
     def get_player(self, nickname: str = '', id_: int = 0) -> dict:
         if id_:
             self.cursor.execute("SELECT * FROM players WHERE id=:id",
@@ -108,7 +109,7 @@ class DataBase:
             self.set_balance(player_id_, balance)
 
         except sqlite3.DatabaseError as e:
-            logging.error("create_player error: {}".format(e.args))
+            logging.error("buy_item error: {}".format(e.args))
             return {'status': 'failed'}
 
         self.conn.commit()
@@ -123,6 +124,13 @@ class DataBase:
             if balance < 0:
                 return {'status': 'failed'}
 
+            self.cursor.execute("SELECT * FROM player_items "
+                                "WHERE player_id=:player_id_ and item_id=:item_id_",
+                                {'player_id_': player_id_, 'item_id_': item_id_})
+
+            if not self.cursor.fetchone():
+                return {'status': 'failed'}
+
             self.cursor.execute("DELETE FROM player_items "
                                 "WHERE player_id=:player_id_ and item_id=:item_id_",
                                 {'player_id_': player_id_, 'item_id_': item_id_})
@@ -130,7 +138,7 @@ class DataBase:
             self.set_balance(player_id_, balance)
 
         except sqlite3.DatabaseError as e:
-            logging.error("create_player error: {}".format(e.args))
+            logging.error("sell_item error: {}".format(e.args))
             return {'status': 'failed'}
 
         self.conn.commit()
@@ -145,22 +153,22 @@ class DataBase:
         else:
             return {}
 
-    def get_items(self, id_: int) -> dict:
+    def get_items(self, player_id_: int) -> dict:
         self.cursor.execute("""SELECT * FROM items WHERE id NOT IN
                                     (SELECT item_id FROM player_items
-                                    WHERE player_id=:id_)""", {'id_': id_})
+                                    WHERE player_id=:player_id_)""", {'player_id_': player_id_})
         result = self.cursor.fetchall()
         if result:
             return {'items': result}
         else:
             return {}
 
-    def get_player_items(self, id_: int) -> dict:
+    def get_player_items(self, player_id_: int) -> dict:
         self.cursor.execute("""SELECT * FROM items WHERE id IN
                             (SELECT item_id FROM player_items
-                            WHERE player_id=:id_)""", {'id_': id_})
+                            WHERE player_id=:player_id_)""", {'player_id_': player_id_})
         result = self.cursor.fetchall()
-        credits_ = self.get_player(id_=id_)['credits']
+        credits_ = self.get_player(id_=player_id_)['credits']
         return {'items': result, 'credits': credits_}
 
     def get_credits(self, id_: int) -> dict:
@@ -173,6 +181,7 @@ class DataBase:
                                 "WHERE id=:player_id_",
                                 {'balance': balance, 'player_id_': player_id_})
         except sqlite3.DatabaseError as e:
+            logging.error("set_balance error: {}".format(e.args))
             return {}
 
         self.conn.commit()
@@ -207,6 +216,14 @@ class GameServer:
             print('KeyboardInterrupt. Exit')
             pass
 
+        # TODO При одновременном подключении нескольких клиентов остальные на остановку сервера никак не отреагировали.
+        # Но при попытке отправки какого-либо запроса клиенты падали на необработанном исключении.
+        #
+        # Решение: у сервера должен быть список (например, в виде таблицы БД) залогинившихся в текущий момент
+        # пользователей (в данном случае можно пройтись по запущенным сопрограммам).
+        # При остановке сервера он должен рассылать этому списку уведомления о своей остановке.
+        # Ну и соответственно, сделать обработку этого уведомления на клиенте.
+
         # Close the server
         self.db.close()
         server.close()
@@ -234,6 +251,16 @@ class GameServer:
         try:
             addr = writer.get_extra_info('peername')
             while True:
+                # TODO При обработке запросов от клиента на сервере нет проверки на некорректные аргументы – никак
+                # не обрабатываются случаи, если данные по указанному player_id отсутствуют.
+                #
+                # Решение: проверка валидности данных на стороне сервере обязательна. Проверки на стороне
+                # клиента нужны в основном для того, чтобы не нагружать сервер заведомо неверными запросами. Поэтому
+                # обычно проверки на стороне клиента - поверхностные, на общую корректность. Все остальное на сервере:
+                # можно ли что-то сделать, есть ли такой пользователь, есть ли у него права на это действие и т.д.
+                # Правильным решением будет использование что-то вроде
+                # if not self.valid(request): data = {'status': 'failed'}
+
                 data = None
                 request_b = await reader.read(cf._max_buffer)
                 request = cf.decode(request_b)
@@ -264,7 +291,7 @@ class GameServer:
 
                 elif 'logout' in keys_:
                     writer.close()
-                    await writer.wait_closed()
+                    # await writer.wait_closed()
                     logging.debug('Logout {} ({})'.format(request['logout'], addr))
                     break
 
@@ -279,12 +306,12 @@ class GameServer:
             print('Connection reset by peer')
             logging.error("ConnectionResetError: {}".format(e.args))
             writer.close()
-            await writer.wait_closed()
+            # await writer.wait_closed()
         except json.decoder.JSONDecodeError as e:
             print('Uncorrected format')
             logging.error("JSONDecodeError: {}".format(e.args))
             writer.close()
-            await writer.wait_closed()
+            # await writer.wait_closed()
 
         finally:
             print("Closed connection from {}".format(addr))
